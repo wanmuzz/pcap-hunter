@@ -1,0 +1,12 @@
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+.streamlit/
+*.pcap
+*.pcapng
+*.zip
+venv/
+__pycache__/
+*.pyc
+.env
