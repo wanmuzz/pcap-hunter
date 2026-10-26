@@ -21,8 +21,8 @@
 
 <br>
 
-> **🚨 THE WAR-ROOM SCENARIO:** You are handed a raw `6.6 MB` packet capture (`702` events across `98` conversation flows). Every single external IP address passes static Threat Intelligence blocklists as **"Clean / Not Listed"**. Yet, an internal workstation is quietly compromised and polling a Command & Control (C2) server every 60 seconds.  
-> **Can your tooling find the implant in under 5 seconds—without relying on known signatures?**
+> **🚨 THE WAR-ROOM SCENARIO:** You are handed a raw `6.6 MB` packet capture (`443` DNS queries, `160` TLS handshakes and `98` conversation flows). The suspicious server `45.131.214.85` has no listing in Abuse.ch ThreatFox, so a static blocklist check alone would let it through. Yet, an internal workstation is polling that Command and Control (C2) server about every 60 seconds.  
+> **Can your tooling find the implant without relying on known signatures?**
 
 <br>
 
@@ -30,7 +30,7 @@
 
 <br>
 
-**[⚡ 30-Second Executive Summary](#-30-second-executive-summary)** • **[🧠 The Math Under the Hood](#-the-mathematics-of-behavioral-hunting)** • **[🕵️‍♂️ 5-Second Kill-Chain Walkthrough](#️-the-5-second-kill-chain-unmasking-netsupport-rat)** • **[🏗️ Architecture](#️-streaming-o1-memory-architecture)** • **[🚀 Quickstart](#-installation--quickstart)**
+**[⚡ 30-Second Executive Summary](#-30-second-executive-summary)** • **[🧠 The Math Under the Hood](#-the-mathematics-of-behavioral-hunting)** • **[🕵️‍♂️ Kill-Chain Walkthrough](#️-kill-chain-walkthrough-unmasking-netsupport-rat)** • **[🏗️ Architecture](#️-streaming-memory-architecture)** • **[🚀 Quickstart](#-installation--quickstart)**
 
 </div>
 
@@ -44,10 +44,10 @@ Modern red teams and ransomware operators treat IP addresses and domains like bu
 
 | Feature / Attack Vector | Legacy Signature / IOC Scanners | 🛡️ PCAP-Hunter (NetSentinel) |
 | :--- | :--- | :--- |
-| **Brand-New / Unlisted C2 IPs** | ❌ **100% Blind** (Zero blocklist hits) | ✅ **Caught** via Inter-Arrival Jitter Profiling ($CV \le 0.35$) |
+| **Brand-New / Unlisted C2 IPs** | ❌ **Blind** (no blocklist hit) | ✅ **Caught** via Inter-Arrival Jitter Profiling ($CV \le 0.35$) |
 | **Port 443 Protocol Masquerading** | ❌ **Misses** cleartext HTTP over TLS ports | ✅ **Caught** by tracking conversation cadence across all ports |
 | **DNS Tunneling & Exfiltration** | ❌ **Blind** to custom domains | ✅ **Caught** via Subdomain Shannon Entropy ($H(X) \ge 3.8$) |
-| **RAM Usage on Large Captures** | 💥 **Crashes** (Loads full PCAP into RAM) | ⚡ **Constant $O(1)$ Memory** (`pyshark` streaming with `keep_packets=False`) |
+| **RAM Usage on Large Captures** | ⚠️ **Can be heavy** (some tools load the full PCAP into RAM) | ⚡ **Streaming, low memory** (`pyshark` streaming with `keep_packets=False`) |
 | **SOC Analyst Pivot Time** | 🐢 **15–45 mins** of manual packet scrolling | 🎯 **Instant** copy-ready Wireshark display filter & `.md` Incident Report |
 
 ---
@@ -94,7 +94,7 @@ $$H(X) = -\sum_{i=1}^{n} P(x_i) \log_2 P(x_i)$$
 
 ---
 
-## 🕵️‍♂️ The 5-Second Kill Chain: Unmasking NetSupport RAT
+## 🕵️‍♂️ Kill Chain Walkthrough: Unmasking NetSupport RAT
 
 We tested **PCAP-Hunter** against a real-world infection capture (`2026-02-28-traffic-analysis-exercise.pcap`). Here is how the engine took the investigation from raw packets to confirmed payload proof:
 
@@ -111,7 +111,7 @@ While 97 flows scattered harmlessly across the upper human-browsing region, **on
 * **C2 Destination:** `45.131.214.85:443`
 * **Heartbeat Cadence:** `265 callbacks` firing every **`59.23 seconds`**
 * **Measured Jitter ($CV$):** **`0.124`** *(Robotic 1-minute sleep timer)*
-* **Abuse.ch ThreatFox Status:** `Not listed in ThreatFox` *(100% invisible to static threat feeds)*
+* **Abuse.ch ThreatFox Status:** `Not listed in ThreatFox` *(no match in the ThreatFox feed at analysis time)*
 
 ---
 
@@ -132,14 +132,14 @@ NetSentinel immediately flagged **`MITRE T1071.001`**, rendered an inline severi
 
 ---
 
-### 🔥 Phase 3: Smoking-Gun Payload Proof in Wireshark (T+05 Seconds)
+### 🔥 Phase 3: Smoking-Gun Payload Proof in Wireshark
 Pasting NetSentinel's auto-generated pivot filter directly into Wireshark:
 
 <pre>
 ip.addr == 45.131.214.85 && (tcp.flags.syn == 1 || http.request || tls.handshake.type == 1)
 </pre>
 
-And opening `Follow TCP Stream` (`tcp.stream eq 40`) exposed the attacker's exact tradecraft: **cleartext HTTP POST traffic masquerading over port 443** (normally reserved for encrypted HTTPS) controlled by a **NetSupport Manager RAT** gateway:
+And opening `Follow TCP Stream` (`tcp.stream eq 40`) exposed the attacker's exact tradecraft: **cleartext HTTP POST traffic masquerading over port 443** (normally reserved for encrypted HTTPS) controlled by a **NetSupport Manager** gateway (a legitimate remote-admin tool commonly abused as a RAT):
 
 <div align="center">
   <img src="assets/05-wireshark-payload-proof.png" alt="Wireshark Follow TCP Stream NetSupport RAT Proof" width="95%"/>
@@ -157,7 +157,7 @@ CMD=POLL&INFO=1&ACK=1
 
 ---
 
-## 🏗️ Streaming O(1) Memory Architecture
+## 🏗️ Streaming Memory Architecture
 
 Standard Python packet parsers crash when handed large PCAPs because they load every dissected packet object into system RAM. **PCAP-Hunter** enforces `keep_packets=False` inside `pyshark.FileCapture` generators—streaming only lightweight protocol metadata through `tshark`:
 
@@ -229,7 +229,7 @@ pcap-hunter/
 ├── intel/
 │   └── threatfox.py         # Abuse.ch ThreatFox IOC enrichment client
 ├── samples/
-│   └── 2026-02-28-traffic-analysis-exercise.pcap  # Real-world NetSupport RAT PCAP
+│   └── 2026-02-28-traffic-analysis-exercise.pcap  # NOT in repo, download it (see samples/README.md)
 ├── dashboard.py             # Interactive Dark-Mode Streamlit SOC Web Console
 ├── main.py                  # Headless Rich CLI Triage Engine
 ├── requirements.txt         # Project dependencies
@@ -274,3 +274,13 @@ python3 main.py --pcap samples/2026-02-28-traffic-analysis-exercise.pcap
 *If this project gave you ideas for your own detection lab, drop a ⭐ on the repo!*
 
 </div>
+
+---
+
+## ⚠️ Limitations
+
+- Validated on one public capture so far. Thresholds (CV <= 0.35, entropy >= 3.8, interval >= 2s) were tuned on it and may need adjusting for other networks.
+- Beacons with high sleep jitter can raise their CV above the threshold and evade a fixed cutoff.
+- Detection is timing-based only. It does not decrypt or inspect encrypted payloads.
+- ThreatFox lookups may need an Abuse.ch Auth-Key, depending on the API version.
+- Planned: test against my own lab C2 traffic with different jitter settings, and more real-world captures.
